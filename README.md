@@ -1,4 +1,4 @@
-# Esseallond Snarl
+# Snarl
 
 To run Snarl, begin by starting the server. This is done with  
 the command   
