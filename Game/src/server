@@ -1,0 +1,130 @@
+#!/usr/bin/python3
+
+import socket
+import os
+from _thread import *
+import argparse
+import json
+import sys
+sys.path.insert(0, "./src")
+from game_manager import GameManager
+
+
+# Handle the args
+parser = argparse.ArgumentParser()
+parser.add_argument("--levels", type=str, default="snarl.levels")
+parser.add_argument("--clients", type=int, default=4)
+parser.add_argument("--wait", type=int, default=60)
+parser.add_argument("--observe", action="store_true")
+parser.add_argument("--address", type=str, default="127.0.0.1")
+parser.add_argument("--port", type=int, default="45678")
+
+args = parser.parse_args()
+
+timeout = 0
+
+# 
+# Tells if string is a JSON value
+# String -> Bool
+#
+def is_json(maybe_json_string):
+    try:
+        json_object = json.loads(maybe_json_string)
+    except ValueError as e:
+        return False
+    return True
+
+# Opens the given level file
+game_file = open(args.levels, "r")
+
+# The first line is the number of levels
+num_levels = int(game_file.readline())
+
+# Load each level json into an array
+level_array = []
+for i in range (num_levels):
+    json_loads = False
+    json_string = ""
+    level_json = None
+
+    while not json_loads:
+        next_line = game_file.readline()
+        json_string = json_string + next_line
+
+        if is_json(json_string):
+            level_json = json.loads(json_string)
+            json_loads = True
+
+    level_array.append(level_json)
+
+# initialize the GameManager
+gm = GameManager(num_levels, level_array)  
+
+# Add an observer if true
+if args.observe:
+    gm.add_observer()
+
+# Set up server 
+server_socket = socket.socket()
+server_socket.settimeout(args.wait)
+host = args.address
+port = args.port
+connected_client_count = 0
+user_sockets = {}
+
+try:
+    server_socket.bind((host, port))
+except socket.error as e:
+    print(str(e))
+
+# Begin listening for X number of clients
+server_socket.listen(args.clients)
+
+def handle_reply(message):
+    return message
+
+# Client thread that opens when a client connects
+def client_thread(conn):
+    print(conn)
+    user_registered = False
+    server_welcome = {
+        "type": "welcome",
+        "info": "Esseallond Server 1.0\nInvalid moves will result in a skipped turn"
+    }
+    conn.send(json.dumps(server_welcome).encode())
+    conn.send(json.dumps("name").encode())
+    while not user_registered:
+        data = conn.recv(2048)
+        username = data.decode()
+        gm.add_network_user(username, conn)
+        user_registered = True
+        user_sockets[username] = conn
+        
+
+
+# Wait for clients to connect
+while connected_client_count < args.clients:
+    try:
+        client, address = server_socket.accept()
+    except socket.timeout:
+        exit()
+    start_new_thread(client_thread, (client, ))
+    connected_client_count += 1
+    print("Player " + str(connected_client_count - 1) +  " has connected")
+
+
+# Wait for users to establish names
+while len(gm.users) != args.clients:
+    continue
+
+# Start the game
+if len(gm.users) == args.clients:
+    server_socket.settimeout(None)
+    gm.start_game(1)
+
+# Close all the connections
+for key, client in user_sockets.items():
+    client.close() 
+
+# Shut the game down
+server_socket.close()

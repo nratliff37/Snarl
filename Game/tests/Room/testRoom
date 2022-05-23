@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+
+import sys
+import json
+sys.path.insert(0, "../../src")
+from room import Room
+from point import Point
+from tile import Tile
+
+class TestRoom:
+
+    def __init__(self):
+        self.room = None
+        self.test()
+
+    #
+    #
+    # Point Point Point[] -> void
+    #
+    def success_message(self, point, origin, traversables):
+        traversables_arr = []
+        for tile in traversables:
+            traversables_arr.append(self.point_to_array(tile))
+        success_arr = ["Success: Traversable points from ", self.point_to_array(point), " in room at ", self.point_to_array(origin), " are ", traversables_arr]
+        print(json.dumps(success_arr))
+    
+    #
+    #
+    # Point Point -> void
+    #
+    def failure_message(self, point, origin):
+        failure_arr = ["Failure: Point ", self.point_to_array(point), " is not in room at ", self.point_to_array(origin)]
+        print(json.dumps(failure_arr))
+
+    #
+    #
+    # Point -> [int, int]
+    #
+    def point_to_array(self, point):
+        return [point.x, point.y]
+    
+    #
+    #
+    # [int, int] -> Point
+    #
+    def array_to_point(self, arr):
+         return Point(arr[0], arr[1])
+
+    #
+    #
+    # Point -> Point[]
+    #
+    def traversable_tiles(self, point):
+        tiles = self.room.tiles
+
+        unseen = []
+        seen = []
+        traversable = []
+
+        unseen.append(str(point))
+        
+        while unseen:
+            current = unseen.pop(0)
+            seen.append(current)
+    
+            tile = self.room.tiles.get(current, False)
+
+            if tile:
+                attribute = self.room.tiles[current].attribute
+
+                coords = current.split(",")
+
+                current_point = Point(coords[0], coords[1])
+                if attribute == Tile.ROOM_FLOOR or attribute == Tile.DOOR:
+                    traversable.append(current_point)
+
+                    neighbors = current_point.neighbors()
+            
+                    for neighbor in neighbors:
+                        if str(neighbor) not in seen and str(neighbor) not in unseen:
+                            unseen.append(str(neighbor))
+        return traversable
+            
+
+
+    #
+    #
+    # -> void
+    #
+    def test(self):
+
+        test_str = ""
+        for line in sys.stdin:
+            test_str += line
+        test_json = json.loads(test_str)
+
+        point_arr = test_json[1]
+        point = self.array_to_point(point_arr)
+
+        room_json = test_json[0]
+
+        
+        origin_arr = room_json["origin"]
+        origin = self.array_to_point(origin_arr)
+
+        layout_str = ""
+
+        layout_arr = room_json["layout"]
+        for y in layout_arr:
+            for x in y:
+                if x == 0:
+                    layout_str = layout_str + Tile.ROOM_WALL 
+                elif x == 1:
+                    layout_str = layout_str + Tile.ROOM_FLOOR 
+                elif x == 2:
+                    layout_str = layout_str + Tile.DOOR
+            layout_str = layout_str + "\n"
+
+        self.room = Room(origin, layout_str)
+
+        if (str(point) in self.room.tiles):
+            traversable_tiles = self.traversable_tiles(point)
+            self.success_message(point, origin, traversable_tiles)
+        else:
+            self.failure_message(point, origin)
+        
+testRoom = TestRoom()

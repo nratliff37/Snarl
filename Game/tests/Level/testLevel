@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+
+import sys
+import json
+sys.path.insert(0, "../../src")
+from level import Level
+from hallway import Hallway
+from room import Room
+from point import Point
+from tile import Tile
+
+
+class TestLevel:
+
+    def __init__(self):
+        self.level = None
+        self.test()
+
+    #
+    #
+    # boolean nullable_string nullable_string Point[] -> void
+    #
+    def success_message(self, traversable, obj, typ, reachable):
+        success_json = {
+            "traversable" : traversable,
+            "object": obj,
+            "type": typ,
+            "reachable": reachable
+        }
+        print(json.dumps(success_json))
+    
+    #
+    #
+    # Point -> [int, int]
+    #
+    def point_to_array(self, point):
+        return [point.x, point.y]
+    
+    #
+    #
+    # [int, int] -> Point
+    #
+    def array_to_point(self, arr):
+         return Point(arr[0], arr[1])
+            
+
+    #
+    #
+    #
+    #
+    def add_room(self, room_json):  
+        origin_arr = room_json["origin"]
+        origin = self.array_to_point(origin_arr)
+
+        layout_str = ""
+
+        layout_arr = room_json["layout"]
+        for y in layout_arr:
+            for x in y:
+                if x == 0:
+                    layout_str = layout_str + Tile.ROOM_WALL 
+                elif x == 1:
+                    layout_str = layout_str + Tile.ROOM_FLOOR 
+                elif x == 2:
+                    layout_str = layout_str + Tile.DOOR
+            layout_str = layout_str + "\n"
+
+        self.level.add_room(origin, layout_str)
+
+    #
+    #
+    #
+    #
+    def add_hallway(self, hallway_json):
+        from_arr = hallway_json["from"]
+        from_point = self.array_to_point(from_arr)
+        to_arr = hallway_json["to"]
+        to_point = self.array_to_point(to_arr)
+        waypoints = []
+        for waypoint in hallway_json["waypoints"]:
+            waypoints.append(self.array_to_point(waypoint))
+        self.level.add_hallway(from_point, to_point, waypoints)
+
+    #
+    #
+    #
+    #
+    def add_object(self, object_json):
+        typ = object_json["type"]
+        point_arr = object_json["position"]
+        point = self.array_to_point(point_arr)
+
+        if typ == "key":
+            self.level.place_key(point)
+        elif typ == "exit":
+            self.level.place_exit(point)
+
+    #
+    #
+    #
+    #
+    def from_room(self, point):
+        current_room = None
+        for key, room in self.level.rooms.items():
+            if str(point) in room.tiles:
+                current_room = room
+                break
+        
+        list_of_doors = []
+        for key, tile in current_room.tiles.items():
+            if tile.attribute == Tile.DOOR:
+                coords = key.split(",")
+                list_of_doors.append(Point(coords[0], coords[1]))
+
+        list_of_connected_doors = []
+        for key, hallway in self.level.hallways.items():
+            for door in list_of_doors:
+                if door == hallway.endpoint_1:
+                    list_of_connected_doors.append(hallway.endpoint_2)
+                    break
+                elif door == hallway.endpoint_2:
+                    list_of_connected_doors.append(hallway.endpoint_1)
+                    break
+        
+        connected_rooms_origins = []
+        for door in list_of_connected_doors:
+            for key, room in self.level.rooms.items():
+                if str(door) in room.tiles:
+                    connected_rooms_origins.append(room.origin)
+                    break 
+        
+        connected_rooms = []
+        for origin in connected_rooms_origins:
+            connected_rooms.append(self.point_to_array(origin))
+
+        return connected_rooms
+
+
+    def from_hallway(self, point): 
+        current_hallway = None
+        for key, hallway in self.level.hallways.items():
+            if str(point) in hallway.tiles:
+                current_hallway = hallway
+            
+        connected_rooms_raw = []
+        for key, room in self.level.rooms.items():
+            if str(current_hallway.endpoint_1) in room.tiles or str(current_hallway.endpoint_2) in room.tiles:
+                    connected_rooms_raw.append(room.origin)
+            
+        connected_rooms = []    
+        for origin in connected_rooms_raw:
+            connected_rooms.append(self.point_to_array(origin))
+        return connected_rooms
+                
+    #
+    #
+    # -> void
+    #
+    def test(self):
+
+        test_str = ""
+        for line in sys.stdin:
+            test_str += line
+        test_json = json.loads(test_str)
+
+        point_arr = test_json[1]
+        point = self.array_to_point(point_arr)
+
+        level_json = test_json[0]
+
+        self.level = Level()
+
+        rooms_list = level_json["rooms"]
+        hallways_list = level_json["hallways"]
+        objects_list = level_json["objects"]
+
+        for room in rooms_list:
+            self.add_room(room)
+        
+        for hallway in hallways_list:
+            self.add_hallway(hallway)
+
+        for obj in objects_list:
+            self.add_object(obj)
+       
+        tile_key = str(point)
+
+        tile = self.level.tiles.get(tile_key, Tile(Tile.HALLWAY_WALL))
+
+        traversable = False
+        if tile.attribute == Tile.ROOM_FLOOR or tile.attribute == Tile.HALLWAY_FLOOR or tile.attribute == Tile.DOOR:
+            traversable = True
+        
+        contains_obj = None
+        if tile.item == Tile.KEY:
+            contains_obj = "key"
+        elif tile.item == Tile.EXIT:
+            contains_obj = "exit"
+
+        typ = ""
+        if tile.attribute == Tile.ROOM_FLOOR or tile.attribute == Tile.ROOM_WALL or tile.attribute == Tile.DOOR:
+            typ = "room"
+        elif tile.attribute == Tile.HALLWAY_FLOOR:
+            typ = "hallway"
+        else: 
+            typ = "void"
+
+        connected_rooms = []
+        if typ == "room":
+            connected_rooms = self.from_room(point)
+        elif typ == "hallway":
+            connected_rooms = self.from_hallway(point)
+        elif typ == "void":
+            pass
+
+        self.success_message(traversable, contains_obj, typ, connected_rooms)
+
+        
+        
+        
+
+testLevel = TestLevel()

@@ -1,0 +1,241 @@
+#!/usr/bin/env python3
+
+import sys
+import json
+sys.path.insert(0, "../../src")
+from tile import Tile
+from rulechecker import RuleChecker
+from point import Point
+from player import Player
+from adversary import Adversary
+from level import Level
+from game_state import GameState
+
+
+class TestState:
+
+    def __init__(self):
+        self.game_state = None
+        self.rule_checker = None
+        self.test()
+
+    #
+    #
+    # GameStateJSON -> void
+    #
+    def success_message_neutral(self, state):
+        success_arr = ["Success", state]
+        print(json.dumps(success_arr))
+
+    #
+    #
+    # string, GameStateJSON -> void
+    #
+    def success_message_eject(self, name, state):
+        success_arr = ["Success", "Player ", name, " was ejected.", state]
+        print(json.dumps(success_arr))
+
+    #
+    #
+    # string, GameStateJSON -> void
+    #
+    def success_message_exit(self, name, state):
+        success_arr = ["Success", "Player ", name, " exited.", state]
+        print(json.dumps(success_arr))
+
+    #
+    #
+    # string -> void
+    #
+    def failure_message_no_player(self, name):
+        failure_arr = ["Failure", "Player ",
+            name, " is not a part of the game."]
+        print(json.dumps(failure_arr))
+
+    #
+    #
+    # Point -> void
+    #
+
+    def failure_message_not_traversable(self, point):
+        failure_arr = ["Failure", "The destination position ",
+            self.point_to_array(point), " is invalid."]
+        print(json.dumps(failure_arr))
+
+    #
+    #
+    # Point -> [int, int]
+    #
+    def point_to_array(self, point):
+        return [point.x, point.y]
+
+    #
+    #
+    # [int, int] -> Point
+    #
+    def array_to_point(self, arr):
+         return Point(arr[0], arr[1])
+
+    #
+    #
+    #
+    #
+    def add_room(self, room_json, level):
+        origin_arr = room_json["origin"]
+        origin = self.array_to_point(origin_arr)
+
+        layout_str = ""
+
+        layout_arr = room_json["layout"]
+        for y in layout_arr:
+            for x in y:
+                if x == 0:
+                    layout_str = layout_str + Tile.ROOM_WALL
+                elif x == 1:
+                    layout_str = layout_str + Tile.ROOM_FLOOR
+                elif x == 2:
+                    layout_str = layout_str + Tile.DOOR
+            layout_str = layout_str + "\n"
+
+        level.add_room(origin, layout_str)
+
+    #
+    #
+    #
+    #
+    def add_hallway(self, hallway_json, level):
+        from_arr = hallway_json["from"]
+        from_point = self.array_to_point(from_arr)
+        to_arr = hallway_json["to"]
+        to_point = self.array_to_point(to_arr)
+        waypoints = []
+        for waypoint in hallway_json["waypoints"]:
+            waypoints.append(self.array_to_point(waypoint))
+        level.add_hallway(from_point, to_point, waypoints)
+
+    #
+    #
+    #
+    #
+    def add_object(self, object_json, level):
+        typ = object_json["type"]
+        point_arr = object_json["position"]
+        point = self.array_to_point(point_arr)
+
+        if typ == "key":
+            level.place_key(point)
+        elif typ == "exit":
+            level.place_exit(point)
+
+    #
+    #
+    # -> void
+    #
+    def test(self):
+        test_str = ""
+        for line in sys.stdin:
+            test_str += line
+        test_json = json.loads(test_str)
+
+        self.game_state = GameState()
+
+        state_json = test_json[0]
+        level_json = state_json["level"]
+
+        level = Level()
+
+        rooms_list = level_json["rooms"]
+        hallways_list = level_json["hallways"]
+        objects_list = level_json["objects"]
+
+        for room in rooms_list:
+            self.add_room(room, level)
+        
+        for hallway in hallways_list:
+            self.add_hallway(hallway, level)
+
+        for obj in objects_list:
+            self.add_object(obj, level)
+
+        exit_locked = state_json["exit-locked"]
+        level.key_found = not exit_locked
+        self.game_state.level = level
+
+        players = state_json["players"]
+        for player in players:
+            if player["type"] == "player":
+                player_object = Player(0, player["name"])
+                player_object.location = self.array_to_point(player["position"])
+                self.game_state.add_player(player_object)
+                self.game_state.place_player(player_object, player_object.location)
+        
+        adversaries = state_json["adversaries"]
+        for adversary in adversaries:
+            adversary_object = Adversary(0)
+            adversary_object.location = self.array_to_point(adversary["position"])
+            self.game_state.adversaries.append(adversary_object)
+            self.game_state.place_adversary(adversary_object, adversary_object.location)
+
+        self.rule_checker = RuleChecker(self.game_state)
+
+        current_player = None
+        name = test_json[1]
+
+        name_exist = False
+        for player in self.game_state.players:
+            name_exist = name_exist or player.name == name
+            if player.name == name:
+                current_player = player
+
+        if not name_exist:
+            self.failure_message_no_player(name)
+            return
+        
+        point_arr = test_json[2]
+        point = self.array_to_point(point_arr)
+        if self.rule_checker.validate_place_player(current_player, point):
+            tile = self.game_state.level.tiles[str(point)]
+
+            if tile.adversary:
+                for player in self.game_state.players:
+                    if player.name == current_player.name:
+                        self.game_state.players.remove(player)
+                
+                new_players = []
+                for player in self.game_state.players:
+                    new_player = {"type": "player", "name": player.name, "position": self.point_to_array(player.location)}
+                    new_players.append(new_player)
+
+                state_json["players"] = new_players
+                self.success_message_eject(name, state_json)
+            elif tile.item == tile.EXIT and self.game_state.key_found():
+                for player in self.game_state.players:
+                    if player.name == current_player.name:
+                        self.game_state.players.remove(player)
+
+                new_players = []
+                for player in self.game_state.players:
+                    new_player = {"type": "player", "name": player.name, "position": self.point_to_array(player.location)}
+                    new_players.append(new_player)
+
+                state_json["players"] = new_players
+                self.success_message_exit(name, state_json)
+            else:
+                self.game_state.level.remove_player(current_player.location)
+                self.game_state.level.place_player(current_player, point)
+                current_player.location = point
+                self.game_state.interact_player(current_player)
+
+                new_players = []
+                for player in self.game_state.players:
+                    new_player = {"type": "player", "name": player.name, "position": self.point_to_array(player.location)}
+                    new_players.append(new_player)
+
+                state_json["players"] = new_players
+                state_json["exit-locked"] = self.game_state.key_found()
+
+                self.success_message_neutral(state_json)
+        else:
+            self.failure_message_not_traversable(point)
+
+testState = TestState()
